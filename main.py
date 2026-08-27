@@ -51,6 +51,7 @@ YTDL_OPTIONS = {
     "format": "bestaudio/best",
     "quiet": False,
     "no_warnings": False,
+    "verbose": True,
     "noplaylist": True,
 
     "extractor_args": {
