@@ -52,7 +52,7 @@ YTDL_OPTIONS = {
     "quiet": False,
     "no_warnings": False,
     "noplaylist": True,
-    "cookiefile": "cookies.txt",
+    "cookiefile": "/tmp/cookies.txt",
 
     "extractor_args": {
         "youtube": {
