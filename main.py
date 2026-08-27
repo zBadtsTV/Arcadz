@@ -47,6 +47,9 @@ YTDL_OPTIONS = {
     "noplaylist": True,
 
     "extractor_args": {
+        "youtube": {
+            "player_client": ["mweb"]
+        },
         "youtubepot-bgutilhttp": {
             "base_url": "http://127.0.0.1:4416"
         }
