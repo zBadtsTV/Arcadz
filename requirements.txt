@@ -2,4 +2,4 @@ discord.py[voice]
 yt-dlp[default]
 python-dotenv
 PyNaCl
-yt-dlp-get-pot
+bgutil-ytdlp-pot-provider
