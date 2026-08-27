@@ -39,4 +39,4 @@ WORKDIR /app
 
 COPY . .
 
-CMD ["sh", "-c", "node /opt/bgutil/server/build/main.js & sleep 5; python main.py"]
+CMD ["sh", "-c", "printf '%s' \"$YOUTUBE_COOKIES\" > /tmp/cookies.txt; node /opt/bgutil/server/build/main.js & sleep 5; python main.py"]
