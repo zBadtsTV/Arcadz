@@ -47,6 +47,12 @@ YTDL_OPTIONS = {
     "noplaylist": True,
     "extract_flat": False,
     "source_address": "0.0.0.0",
+
+    "extractor_args": {
+        "youtubepot-bgutilhttp": {
+            "base_url": "http://127.0.0.1:4416"
+        }
+    }
 }
 
 FFMPEG_OPTIONS = {
