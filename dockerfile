@@ -6,6 +6,7 @@ RUN apt-get update && \
     nodejs \
     npm \
     git \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -15,18 +16,17 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -U pip && \
     pip install --no-cache-dir -r requirements.txt
 
-RUN git clone --single-branch \
-    --branch 1.3.1 \
+RUN git clone \
     https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git \
     /opt/bgutil
 
 WORKDIR /opt/bgutil/server
 
-RUN npm ci && \
-    npx tsc
+RUN npm ci
+RUN npx tsc
 
 WORKDIR /app
 
 COPY . .
 
-CMD ["sh", "-c", "node /opt/bgutil/server/build/main.js & sleep 5 && python main.py"]
+CMD ["sh", "-c", "node /opt/bgutil/server/build/main.js & BGUTIL_PID=$!; sleep 5; echo '=== TESTANDO BGUTIL ==='; curl -v http://127.0.0.1:4416/ 2>&1 || true; echo '=== INICIANDO BOT ==='; python main.py"]
