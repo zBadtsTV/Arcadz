@@ -29,4 +29,4 @@ WORKDIR /app
 
 COPY . .
 
-CMD ["sh", "-c", "node /opt/bgutil/server/build/main.js & BGUTIL_PID=$!; sleep 5; echo '=== TESTANDO BGUTIL ==='; curl -v http://127.0.0.1:4416/ 2>&1 || true; echo '=== INICIANDO BOT ==='; python main.py"]
+CMD ["sh", "-c", "node /opt/bgutil/server/build/main.js & sleep 5; echo '=== YTDLP PLUGINS ==='; python -m yt_dlp --version; python -m yt_dlp -v --simulate 'https://www.youtube.com/watch?v=44pt8w67S8I' 2>&1 | grep -E 'Plugin directories|PO Token|bgutil|JS Challenge|player_client|ERROR' || true; echo '=== INICIANDO BOT ==='; python main.py"]
