@@ -29,4 +29,4 @@ WORKDIR /app
 
 COPY . .
 
-CMD ["sh", "-c", "node /opt/bgutil/server/build/main.js & sleep 3 && python main.py"]
+CMD ["sh", "-c", "node /opt/bgutil/server/build/main.js & sleep 5 && python main.py"]
