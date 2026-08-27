@@ -42,11 +42,9 @@ bot = commands.Bot(
 
 YTDL_OPTIONS = {
     "format": "bestaudio/best",
-    "quiet": True,
-    "no_warnings": True,
+    "quiet": False,
+    "no_warnings": False,
     "noplaylist": True,
-    "extract_flat": False,
-    "source_address": "0.0.0.0",
 
     "extractor_args": {
         "youtubepot-bgutilhttp": {
