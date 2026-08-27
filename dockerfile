@@ -1,6 +1,5 @@
 FROM python:3.13-slim
 
-# Dependências do sistema
 RUN apt-get update && \
     apt-get install -y \
     ffmpeg \
@@ -11,12 +10,11 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-# Dependências Python
 COPY requirements.txt .
 
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -U pip && \
+    pip install --no-cache-dir -r requirements.txt
 
-# Instala o PO Token Provider
 RUN git clone --single-branch \
     --branch 1.3.1 \
     https://github.com/Brainicism/bgutil-ytdlp-pot-provider.git \
@@ -24,13 +22,11 @@ RUN git clone --single-branch \
 
 WORKDIR /opt/bgutil/server
 
-RUN npm ci
-RUN npx tsc
+RUN npm ci && \
+    npx tsc
 
 WORKDIR /app
 
-# Código do bot
 COPY . .
 
-# Inicia o provider e depois o bot
-CMD ["sh", "-c", "node /opt/bgutil/server/dist/main.js & python main.py"]
+CMD ["sh", "-c", "node /opt/bgutil/server/build/main.js & sleep 3 && python main.py"]
