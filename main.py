@@ -9,6 +9,13 @@ from discord.ext import commands
 import yt_dlp
 from dotenv import load_dotenv
 
+import yt_dlp
+
+print("=== YT-DLP VERSION ===")
+print(yt_dlp.version.__version__)
+
+print("=== YT-DLP PATH ===")
+print(yt_dlp.__file__)
 
 # ============================================================
 # CONFIG
