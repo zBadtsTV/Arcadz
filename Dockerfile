@@ -39,4 +39,6 @@ WORKDIR /app
 
 COPY . .
 
+ENV PORT=8080
+
 CMD ["sh", "-c", "printf '%s' \"$YOUTUBE_COOKIES\" > /tmp/cookies.txt; node /opt/bgutil/server/build/main.js & sleep 5; python main.py"]
