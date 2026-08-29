@@ -3,3 +3,5 @@ yt-dlp[default]
 python-dotenv
 PyNaCl
 bgutil-ytdlp-pot-provider
+fastapi
+uvicorn[standard]
