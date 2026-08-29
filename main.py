@@ -16,8 +16,7 @@ from discord import app_commands
 from discord.ext import commands
 import yt_dlp
 
-from arcadz_api import ArcadzAPI, Bridge
-
+from backend.arcadz_api import ArcadzAPI, Bridge
 
 # ============================================================
 # CONFIG
