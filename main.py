@@ -47,20 +47,15 @@ bot = commands.Bot(
 # ============================================================
 
 YTDL_OPTIONS = {
-    "format": "bestaudio/best",
-    "quiet": False,
-    "no_warnings": False,
+    "format": "bestaudio[ext=m4a]/bestaudio/best",
     "noplaylist": True,
-    "cookiefile": "/tmp/cookies.txt",
-    "extractor_args": {
-        "youtube": {
-            "player_client": ["web"]
-        },
-        "youtubepot-bgutilhttp": {
-            "base_url": "http://127.0.0.1:4416"
-        }
-    }
+    "quiet": True,
+    "default_search": "ytsearch",
+    "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
+    # se o vídeo tiver restrição de idade/bot-check:
+    # "cookiefile": "/app/cookies.txt",
 }
+
 
 FFMPEG_OPTIONS = {
     "before_options": (
