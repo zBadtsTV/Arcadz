@@ -46,15 +46,48 @@ bot = commands.Bot(
 # YOUTUBE / YT-DLP
 # ============================================================
 
+# ============================================================
+# YOUTUBE COOKIES
+# ============================================================
+# No Railway, crie a variável YOUTUBE_COOKIES e cole nela o
+# conteúdo completo do arquivo cookies.txt (formato Netscape).
+# O bot cria /tmp/cookies.txt automaticamente.
+
+cookie_data = os.getenv("YOUTUBE_COOKIES", "").strip()
+COOKIE_FILE = "/tmp/cookies.txt"
+
+if cookie_data:
+    try:
+        with open(COOKIE_FILE, "w", encoding="utf-8") as f:
+            f.write(cookie_data)
+        print("[YouTube] Cookies carregados em /tmp/cookies.txt")
+    except Exception as e:
+        print(f"[YouTube] Erro ao salvar cookies: {e}")
+else:
+    print("[YouTube] YOUTUBE_COOKIES não configurado.")
+
+
 YTDL_OPTIONS = {
     "format": "bestaudio[ext=m4a]/bestaudio/best",
     "noplaylist": True,
     "quiet": True,
+    "no_warnings": False,
     "default_search": "ytsearch",
-    "extractor_args": {"youtube": {"player_client": ["android", "web"]}},
-    # se o vídeo tiver restrição de idade/bot-check:
-    # "cookiefile": "/app/cookies.txt",
+    "extractor_args": {
+        "youtube": {
+            "player_client": ["web", "android"],
+        },
+        "youtubepot-bgutilhttp": {
+            "base_url": os.getenv(
+                "BGUTIL_URL",
+                "http://127.0.0.1:4416"
+            ),
+        },
+    },
 }
+
+if os.path.exists(COOKIE_FILE):
+    YTDL_OPTIONS["cookiefile"] = COOKIE_FILE
 
 
 FFMPEG_OPTIONS = {
@@ -160,21 +193,49 @@ class MusicPlayer:
         loop = asyncio.get_running_loop()
 
         def run():
-            with yt_dlp.YoutubeDL(YTDL_OPTIONS) as ydl:
-                info = ydl.extract_info(
-                    query,
-                    download=False
-                )
+            last_error = None
 
-                if "entries" in info:
-                    entries = info.get("entries") or []
+            option_sets = [YTDL_OPTIONS]
 
-                    if not entries:
-                        raise ValueError("Nenhum resultado encontrado.")
+            # Fallback simples caso um client específico do YouTube
+            # falhe. Mantemos cookies e bgutil em todas as tentativas.
+            fallback = dict(YTDL_OPTIONS)
+            fallback["extractor_args"] = {
+                "youtube": {
+                    "player_client": ["web"],
+                },
+                "youtubepot-bgutilhttp": {
+                    "base_url": os.getenv(
+                        "BGUTIL_URL",
+                        "http://127.0.0.1:4416"
+                    ),
+                },
+            }
 
-                    info = entries[0]
+            if fallback["extractor_args"] != YTDL_OPTIONS["extractor_args"]:
+                option_sets.append(fallback)
 
-                return info
+            for options in option_sets:
+                try:
+                    with yt_dlp.YoutubeDL(options) as ydl:
+                        info = ydl.extract_info(
+                            query,
+                            download=False
+                        )
+
+                    if "entries" in info:
+                        entries = info.get("entries") or []
+
+                        if not entries:
+                            raise ValueError("Nenhum resultado encontrado.")
+
+                        info = entries[0]
+
+                    return info
+                except Exception as e:
+                    last_error = e
+
+            raise last_error or ValueError("Não foi possível extrair a música.")
 
         info = await loop.run_in_executor(None, run)
 
@@ -835,17 +896,20 @@ async def on_ready():
 
     # Inicia a FastAPI apenas uma vez.
     if arcadz_api is None:
-        arcadz_api = ArcadzAPI(
-            bot,
-            bridge=ArcadzBridge()
-        )
+        try:
+            arcadz_api = ArcadzAPI(
+                bot,
+                bridge=ArcadzBridge()
+            )
 
-        arcadz_api_task = arcadz_api.start()
+            arcadz_api_task = arcadz_api.start()
 
-        print(
-            f"[ArcadZ] API iniciada na porta "
-            f"{os.getenv('PORT', '8000')}"
-        )
+            print(
+                f"[ArcadZ] API iniciada na porta "
+                f"{os.getenv('PORT', '8000')}"
+            )
+        except Exception as e:
+            print(f"[ArcadZ] ERRO ao iniciar API: {e}")
 
     try:
         synced = await bot.tree.sync()
