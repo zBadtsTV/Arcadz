@@ -68,7 +68,7 @@ else:
 
 
 YTDL_OPTIONS = {
-    "format": "bestaudio[ext=m4a]/bestaudio/best",
+    "format": "bestaudio[ext=webm]/bestaudio/best",
     "noplaylist": True,
     "quiet": True,
     "no_warnings": False,
