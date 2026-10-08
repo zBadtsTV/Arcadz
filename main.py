@@ -68,26 +68,18 @@ else:
 
 
 YTDL_OPTIONS = {
-    "format": "bestaudio[ext=webm]/bestaudio/best",
+    "format": "bestaudio/best",
     "noplaylist": True,
     "quiet": True,
-    "no_warnings": False,
-    "default_search": "ytsearch",
     "extractor_args": {
-        "youtube": {
-            "player_client": ["web", "android"],
-        },
         "youtubepot-bgutilhttp": {
-            "base_url": os.getenv(
-                "BGUTIL_URL",
-                "http://127.0.0.1:4416"
-            ),
-        },
+            "base_url": "http://127.0.0.1:4416"
+        }
     },
 }
 
-if os.path.exists(COOKIE_FILE):
-    YTDL_OPTIONS["cookiefile"] = COOKIE_FILE
+if os.path.exists("/tmp/cookies.txt"):
+    YTDL_OPTIONS["cookiefile"] = "/tmp/cookies.txt"
 
 
 FFMPEG_OPTIONS = {
