@@ -42,6 +42,7 @@ bot = commands.Bot(
 )
 
 
+
 # ============================================================
 # YOUTUBE / YT-DLP
 # ============================================================
@@ -49,38 +50,69 @@ bot = commands.Bot(
 # ============================================================
 # YOUTUBE COOKIES
 # ============================================================
-# No Railway, crie a variável YOUTUBE_COOKIES e cole nela o
-# conteúdo completo do arquivo cookies.txt (formato Netscape).
-# O bot cria /tmp/cookies.txt automaticamente.
 
-cookie_data = os.getenv("YOUTUBE_COOKIES", "").strip()
 COOKIE_FILE = "/tmp/cookies.txt"
+cookie_data = os.getenv("YOUTUBE_COOKIES", "").strip()
 
 if cookie_data:
     try:
-        with open(COOKIE_FILE, "w", encoding="utf-8") as f:
-            f.write(cookie_data)
-        print("[YouTube] Cookies carregados em /tmp/cookies.txt")
-    except Exception as e:
-        print(f"[YouTube] Erro ao salvar cookies: {e}")
-else:
-    print("[YouTube] YOUTUBE_COOKIES não configurado.")
+        # Salva o conteúdo completo da variável do Railway
+        with open(COOKIE_FILE, "w", encoding="utf-8", newline="\n") as f:
+            f.write(cookie_data + "\n")
 
+        if os.path.getsize(COOKIE_FILE) > 0:
+            print(
+                f"[YouTube] Arquivo de cookies criado "
+                f"({os.path.getsize(COOKIE_FILE)} bytes)."
+            )
+        else:
+            print("[YouTube] ERRO: arquivo de cookies vazio.")
+
+    except Exception as e:
+        print(f"[YouTube] ERRO ao salvar cookies: {e}")
+else:
+    print(
+        "[YouTube] AVISO: variável YOUTUBE_COOKIES não configurada. "
+        "O bot tentará acessar vídeos públicos sem cookies."
+    )
+
+
+# ============================================================
+# YT-DLP
+# ============================================================
 
 YTDL_OPTIONS = {
     "format": "bestaudio/best",
     "noplaylist": True,
     "quiet": True,
+    "no_warnings": False,
+    "cachedir": False,
+    "socket_timeout": 30,
+    "retries": 3,
+    "fragment_retries": 3,
+
+    # Provider HTTP do bgutil no mesmo container
     "extractor_args": {
         "youtubepot-bgutilhttp": {
-            "base_url": "http://127.0.0.1:4416"
+            "base_url": os.getenv(
+                "BGUTIL_URL",
+                "http://127.0.0.1:4416"
+            )
         }
     },
 }
 
-if os.path.exists("/tmp/cookies.txt"):
-    YTDL_OPTIONS["cookiefile"] = "/tmp/cookies.txt"
+# Só utiliza cookies se o arquivo foi criado com conteúdo
+if cookie_data and os.path.isfile(COOKIE_FILE):
+    YTDL_OPTIONS["cookiefile"] = COOKIE_FILE
+    print("[YouTube] Uso de cookies habilitado.")
+else:
+    print("[YouTube] Uso de cookies desabilitado.")
 
+
+# ============================================================
+# FFMPEG
+# ============================================================
 
 FFMPEG_OPTIONS = {
     "before_options": (
