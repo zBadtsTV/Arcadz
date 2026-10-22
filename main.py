@@ -759,6 +759,26 @@ class ArcadzBridge(Bridge):
         if not query:
             return []
         query = await resolve_music_query(query)
+        # Use Lavalink for site searches too. Previously only /play used
+        # Lavalink, while /api/search still extracted via yt-dlp.
+        if lavalink_ready and wavelink is not None:
+            identifier = query if query.startswith(("http://", "https://")) else "ytmsearch:" + query
+            started = time.monotonic()
+            results = await asyncio.wait_for(wavelink.Playable.search(identifier), timeout=18)
+            tracks = results.tracks if hasattr(results, "tracks") else results
+            output = []
+            for track in list(tracks or [])[:5]:
+                output.append({
+                    "id": str(getattr(track, "identifier", "") or ""),
+                    "title": track.title,
+                    "channel": getattr(track, "author", "") or "",
+                    "thumbnail": getattr(track, "artwork", None),
+                    "duration": round(track.length / 1000) if track.length else 0,
+                    "url": track.uri or query,
+                    "requestedBy": "",
+                })
+            print(f"[Lavalink] API search: {len(output)} resultados em {time.monotonic()-started:.2f}s")
+            return output
         if query.startswith(("https://", "http://")):
             return await asyncio.wait_for(asyncio.to_thread(self._search_url, query), timeout=25)
 
