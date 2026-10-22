@@ -2,6 +2,10 @@ import os
 import asyncio
 import time
 import random
+import re
+import json
+from urllib.request import Request, urlopen
+from urllib.parse import quote
 from dataclasses import dataclass
 from typing import Optional, Any
 
@@ -87,17 +91,14 @@ YTDL_OPTIONS = {
     "quiet": True,
     "no_warnings": False,
     "cachedir": False,
-    "socket_timeout": 30,
-    "retries": 3,
-    "fragment_retries": 3,
+    "socket_timeout": 10,
+    "retries": 1,
+    "fragment_retries": 1,
 
     # Provider HTTP do bgutil no mesmo container
     "extractor_args": {
         "youtubepot-bgutilhttp": {
-            "base_url": os.getenv(
-                "BGUTIL_URL",
-                "http://127.0.0.1:4416"
-            )
+            "base_url": [(os.getenv("BGUTIL_URL") or "http://127.0.0.1:4416").strip()]
         }
     },
 }
@@ -122,6 +123,37 @@ FFMPEG_OPTIONS = {
     ),
     "options": "-vn",
 }
+
+
+SPOTIFY_TRACK_RE = re.compile(
+    r"https?://open\.spotify\.com/(?:intl-[a-z]{2}/)?track/([A-Za-z0-9]+)"
+)
+
+async def resolve_music_query(query: str) -> str:
+    match = SPOTIFY_TRACK_RE.search(query)
+    if not match:
+        return query
+    spotify_url = f"https://open.spotify.com/track/{match.group(1)}"
+    def fetch_metadata():
+        endpoint = "https://open.spotify.com/oembed?url=" + quote(spotify_url, safe="")
+        req = Request(endpoint, headers={"User-Agent": "ArcadzBot/1.0"})
+        with urlopen(req, timeout=8) as response:
+            data = json.load(response)
+        title = (data.get("title") or "").strip()
+        if not title:
+            raise ValueError("Spotify nao retornou o nome da faixa.")
+        title = re.sub(r"\s*\|\s*Spotify\s*$", "", title, flags=re.I)
+        title = re.sub(r"\s+-\s+song(?: and lyrics)? by\s+", " ", title, flags=re.I)
+        return title
+    try:
+        title = await asyncio.to_thread(fetch_metadata)
+    except Exception as exc:
+        raise ValueError(
+            "Nao foi possivel identificar esta faixa do Spotify. "
+            "Tente pesquisar pelo nome e artista."
+        ) from exc
+    print(f"[ArcadZ] Spotify convertido em pesquisa: {title}")
+    return title
 
 
 # ============================================================
@@ -213,7 +245,9 @@ class MusicPlayer:
     # --------------------------------------------------------
 
     async def extract(self, query: str, requester: str):
-
+        query = await resolve_music_query(query)
+        if not query.startswith(("http://", "https://", "ytsearch")):
+            query = f"ytsearch1:{query}"
         loop = asyncio.get_running_loop()
 
         def run():
@@ -229,10 +263,7 @@ class MusicPlayer:
                     "player_client": ["web"],
                 },
                 "youtubepot-bgutilhttp": {
-                    "base_url": os.getenv(
-                        "BGUTIL_URL",
-                        "http://127.0.0.1:4416"
-                    ),
+                    "base_url": [(os.getenv("BGUTIL_URL") or "http://127.0.0.1:4416").strip()],
                 },
             }
 
@@ -261,8 +292,9 @@ class MusicPlayer:
 
             raise last_error or ValueError("Não foi possível extrair a música.")
 
+        started = time.monotonic()
         info = await loop.run_in_executor(None, run)
-
+        print(f"[ArcadZ] Extracao concluida em {time.monotonic() - started:.1f}s")
         return Track(
             title=info.get(
                 "title",
@@ -605,9 +637,11 @@ class ArcadzBridge(Bridge):
 
     async def search(self, query: str):
         query = query.strip()
-
         if not query:
             return []
+        query = await resolve_music_query(query)
+        if query.startswith(("https://", "http://")):
+            return await asyncio.wait_for(asyncio.to_thread(self._search_url, query), timeout=25)
 
         loop = asyncio.get_running_loop()
 
@@ -654,6 +688,29 @@ class ArcadzBridge(Bridge):
 
         # The worker may finish later, but the HTTP request will not hang indefinitely.
         return await asyncio.wait_for(loop.run_in_executor(None, run), timeout=25)
+
+    @staticmethod
+    def _search_url(url: str):
+        with yt_dlp.YoutubeDL({
+            **YTDL_OPTIONS, "extract_flat": True, "skip_download": True,
+            "socket_timeout": 8, "retries": 1,
+        }) as ydl:
+            info = ydl.extract_info(url, download=False)
+        if not info:
+            return []
+        if "entries" in info:
+            info = next((entry for entry in info["entries"] if entry), None)
+        if not info:
+            return []
+        return [{
+            "id": str(info.get("id") or ""),
+            "title": info.get("title") or "Desconhecido",
+            "channel": info.get("channel") or info.get("uploader") or "",
+            "thumbnail": info.get("thumbnail"),
+            "duration": info.get("duration") or 0,
+            "url": info.get("webpage_url") or url,
+            "requestedBy": "",
+        }]
 
     # --------------------------------------------------------
     # PLAY
