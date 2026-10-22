@@ -41,4 +41,4 @@ COPY . .
 
 ENV PORT=8080
 
-CMD ["sh", "-c", "printf '%s' \"$YOUTUBE_COOKIES\" > /tmp/cookies.txt; node /opt/bgutil/server/build/main.js & sleep 5; python main.py"]
+CMD ["sh", "-c", "node /opt/bgutil/server/build/main.js & for i in $(seq 1 20); do if curl -fsS --max-time 2 http://127.0.0.1:4416/ping >/dev/null; then echo '[bgutil] Provider ready'; exec python main.py; fi; echo '[bgutil] Waiting for provider...'; sleep 1; done; echo '[bgutil] Provider unavailable after 20 attempts' >&2; exit 1"]
