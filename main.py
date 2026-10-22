@@ -613,10 +613,14 @@ class ArcadzBridge(Bridge):
                 **YTDL_OPTIONS,
                 "quiet": True,
                 "skip_download": True,
+                "extract_flat": "in_playlist",
+                "socket_timeout": 8,
+                "retries": 1,
+                "fragment_retries": 1,
             }) as ydl:
 
                 info = ydl.extract_info(
-                    f"ytsearch10:{query}",
+                    f"ytsearch5:{query}",
                     download=False
                 )
 
@@ -636,13 +640,17 @@ class ArcadzBridge(Bridge):
                         ),
                         "thumbnail": item.get("thumbnail"),
                         "duration": item.get("duration") or 0,
-                        "url": item.get("webpage_url") or "",
+                        "url": item.get("webpage_url") or (
+                            f"https://www.youtube.com/watch?v={item['id']}"
+                            if item.get("id") else ""
+                        ),
                         "requestedBy": "",
                     })
 
                 return results
 
-        return await loop.run_in_executor(None, run)
+        # The worker may finish later, but the HTTP request will not hang indefinitely.
+        return await asyncio.wait_for(loop.run_in_executor(None, run), timeout=25)
 
     # --------------------------------------------------------
     # PLAY
@@ -977,6 +985,8 @@ async def join(
 
         return
 
+    await interaction.response.defer()
+
     channel = interaction.user.voice.channel
 
     player = get_player(
@@ -1001,7 +1011,7 @@ async def join(
         }
     )
 
-    await interaction.response.send_message(
+    await interaction.followup.send(
         f"🎵 Entrei em **{channel.name}**!"
     )
 

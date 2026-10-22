@@ -20,11 +20,14 @@ from __future__ import annotations
 
 import asyncio
 import os
+import logging
+import time
 from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
+logger = logging.getLogger("arcadz.api")
 API_TOKEN = os.getenv("ARCADZ_API_TOKEN", "")
 ORIGINS = [
     o.strip()
@@ -187,7 +190,22 @@ class ArcadzAPI:
         @app.get("/api/search")
         async def search(q: str, request: Request):
             self._auth(request)
-            return await br.search(q)
+            q = q.strip()
+            if not q:
+                return []
+            if len(q) > 200:
+                raise HTTPException(status_code=422, detail="search query too long")
+            started = time.monotonic()
+            try:
+                results = await asyncio.wait_for(br.search(q), timeout=28)
+                logger.info("Music search succeeded in %.2fs (%d results)", time.monotonic() - started, len(results))
+                return results
+            except (asyncio.TimeoutError, TimeoutError):
+                logger.warning("Music search timed out after %.2fs", time.monotonic() - started)
+                raise HTTPException(status_code=504, detail="music search timed out")
+            except Exception:
+                logger.exception("Music search failed after %.2fs", time.monotonic() - started)
+                raise HTTPException(status_code=502, detail="music search temporarily unavailable")
 
         @app.post("/api/guilds/{gid}/play")
         async def play(gid: int, request: Request):
