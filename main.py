@@ -126,7 +126,7 @@ FFMPEG_OPTIONS = {
 
 
 SPOTIFY_TRACK_RE = re.compile(
-    r"https?://open\\.spotify\\.com/(?:intl-[a-z]{2}/)?track/([A-Za-z0-9]+)"
+    r"https?://open\.spotify\.com/(?:intl-[a-z]{2}/)?track/([A-Za-z0-9]+)"
 )
 
 async def resolve_music_query(query: str) -> str:
@@ -142,8 +142,8 @@ async def resolve_music_query(query: str) -> str:
         title = (data.get("title") or "").strip()
         if not title:
             raise ValueError("Spotify nao retornou o nome da faixa.")
-        title = re.sub(r"\\s*\\|\\s*Spotify\\s*$", "", title, flags=re.I)
-        title = re.sub(r"\\s+-\\s+song(?: and lyrics)? by\\s+", " ", title, flags=re.I)
+        title = re.sub(r"\s*\|\s*Spotify\s*$", "", title, flags=re.I)
+        title = re.sub(r"\s+-\s+song(?: and lyrics)? by\s+", " ", title, flags=re.I)
         return title
     try:
         title = await asyncio.to_thread(fetch_metadata)
