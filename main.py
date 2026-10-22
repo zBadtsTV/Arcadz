@@ -20,6 +20,15 @@ from discord import app_commands
 from discord.ext import commands
 import yt_dlp
 
+try:
+    import wavelink
+except ImportError:
+    wavelink = None
+
+LAVALINK_URI = os.getenv("LAVALINK_URI", "").strip()
+LAVALINK_PASSWORD = os.getenv("LAVALINK_PASSWORD", "").strip()
+lavalink_ready = False
+
 from backend.arcadz_api import ArcadzAPI, Bridge
 
 # ============================================================
@@ -170,6 +179,7 @@ class Track:
     requester: str
     channel: str = ""
     track_id: str = ""
+    lavalink_playable: Any = None
 
 
 # ============================================================
@@ -187,6 +197,49 @@ async def broadcast(guild_id: int, event: str, data: Optional[dict[str, Any]] = 
             await arcadz_api.broadcast(guild_id, event, data or {})
         except Exception as e:
             print(f"[ArcadZ] Erro no broadcast: {e}")
+
+
+if wavelink is not None:
+    class ArcadzLavalinkVoice(wavelink.Player):
+        def is_connected(self):
+            return self.connected
+
+        def is_playing(self):
+            return self.playing
+
+        def is_paused(self):
+            return self.paused
+else:
+    class ArcadzLavalinkVoice(discord.VoiceClient):
+        pass
+
+
+@bot.event
+async def on_wavelink_track_end(payload):
+    voice = payload.player
+    if not voice or not voice.guild:
+        return
+    player = players.get(voice.guild.id)
+    if not player or not player.using_lavalink:
+        return
+    if player._lavalink_suppress_end:
+        player._lavalink_suppress_end = False
+        return
+    if str(payload.reason).lower() in ("replaced", "cleanup"):
+        return
+    await player.play_next()
+
+
+@bot.event
+async def on_wavelink_track_exception(payload):
+    print(f"[Lavalink] Track exception: {getattr(payload, 'exception', 'unknown')}")
+
+
+@bot.event
+async def on_wavelink_track_stuck(payload):
+    print("[Lavalink] Track stuck; skipping.")
+    if payload.player:
+        await payload.player.skip()
 
 
 # ============================================================
@@ -214,12 +267,16 @@ class MusicPlayer:
 
         # Histórico das músicas tocadas nesta execução do bot.
         self.history: list[Track] = []
+        self.using_lavalink = False
+        self._lavalink_suppress_end = False
 
     # --------------------------------------------------------
     # POSITION
     # --------------------------------------------------------
 
     def position_seconds(self) -> int:
+        if self.using_lavalink and self.voice and self.current:
+            return max(0, int(self.voice.position / 1000))
         if not self.current or self.started_at is None:
             return 0
 
@@ -246,6 +303,31 @@ class MusicPlayer:
 
     async def extract(self, query: str, requester: str):
         query = await resolve_music_query(query)
+        if self.using_lavalink:
+            started = time.monotonic()
+            search = query if query.startswith(("https://", "http://")) else "ytmsearch:" + query
+            try:
+                matches = await asyncio.wait_for(wavelink.Playable.search(search), timeout=14)
+            except Exception as exc:
+                print(f"[Lavalink] Busca YouTube falhou: {exc}")
+                matches = []
+            if not matches and not query.startswith(("http://", "https://")):
+                matches = await asyncio.wait_for(
+                    wavelink.Playable.search("scsearch:" + query), timeout=12
+                )
+            if not matches:
+                raise ValueError("Lavalink nao encontrou musica. Tente outro link ou pesquisa.")
+            item = matches.tracks[0] if hasattr(matches, "tracks") else matches[0]
+            print(f"[Lavalink] Faixa resolvida em {time.monotonic()-started:.2f}s")
+            return Track(
+                title=item.title, url=item.uri or query, stream_url="",
+                thumbnail=getattr(item, "artwork", None),
+                duration=round(item.length / 1000) if item.length else 0,
+                requester=requester, channel=getattr(item, "author", "") or "",
+                track_id=str(getattr(item, "identifier", "") or item.uri or query),
+                lavalink_playable=item,
+            )
+
         if not query.startswith(("http://", "https://", "ytsearch")):
             query = f"ytsearch1:{query}"
         loop = asyncio.get_running_loop()
@@ -352,6 +434,22 @@ class MusicPlayer:
             self.history = self.history[:50]
 
         self._reset_position()
+
+        if self.using_lavalink:
+            try:
+                if track.lavalink_playable is None:
+                    raise ValueError("Faixa sem dados Lavalink.")
+                await self.voice.play(track.lavalink_playable, volume=round(self.volume * 100))
+                print(f"[Lavalink] Tocando: {track.title}")
+                await broadcast(self.guild.id, "track_started", self.api_current())
+                await broadcast(self.guild.id, "queue_updated", {
+                    "queue": [self.api_track(t) for t in self.queue]
+                })
+            except Exception as exc:
+                print(f"[Lavalink] Erro ao iniciar {track.title}: {exc}")
+                self.current = None
+                await self.play_next()
+            return
 
         try:
             # FFmpegPCMAudio starts an ffmpeg subprocess synchronously.
@@ -474,7 +572,7 @@ class MusicPlayer:
 
         self.queue.append(track)
 
-        if not was_playing:
+        if not was_playing and not (self.voice and self.voice.is_paused()):
             await self.play_next()
 
         else:
@@ -496,6 +594,11 @@ class MusicPlayer:
     # --------------------------------------------------------
 
     def pause(self):
+        if self.using_lavalink:
+            if self.voice and self.voice.is_playing():
+                self.paused_at = asyncio.get_running_loop().time()
+                asyncio.create_task(self.voice.pause(True))
+            return
 
         if self.voice and self.voice.is_playing():
             self.paused_at = asyncio.get_running_loop().time()
@@ -506,6 +609,14 @@ class MusicPlayer:
     # --------------------------------------------------------
 
     def resume(self):
+        if self.using_lavalink:
+            if self.voice and self.voice.is_paused():
+                now = asyncio.get_running_loop().time()
+                if self.paused_at is not None:
+                    self.paused_total += now - self.paused_at
+                self.paused_at = None
+                asyncio.create_task(self.voice.pause(False))
+            return
 
         if self.voice and self.voice.is_paused():
             now = asyncio.get_running_loop().time()
@@ -521,6 +632,10 @@ class MusicPlayer:
     # --------------------------------------------------------
 
     def skip(self):
+        if self.using_lavalink:
+            if self.voice and self.current:
+                asyncio.create_task(self.voice.skip())
+            return
 
         if self.voice and (
             self.voice.is_playing()
@@ -533,6 +648,10 @@ class MusicPlayer:
     # --------------------------------------------------------
 
     def stop(self):
+        if self.using_lavalink:
+            self._lavalink_suppress_end = True
+            if self.voice and self.current:
+                asyncio.create_task(self.voice.skip())
 
         self.queue.clear()
 
@@ -894,9 +1013,10 @@ class ArcadzBridge(Bridge):
 
         value = max(0, min(100, int(value)))
         player.volume = value / 100
-
+        if player.using_lavalink and player.voice:
+            await player.voice.set_volume(value)
         if (
-            player.voice
+            not player.using_lavalink and player.voice
             and player.voice.source
             and isinstance(
                 player.voice.source,
@@ -986,6 +1106,16 @@ async def on_ready():
         f"Bot conectado como {bot.user}"
     )
 
+    global lavalink_ready
+    if not lavalink_ready and LAVALINK_URI and LAVALINK_PASSWORD and wavelink is not None:
+        try:
+            node = wavelink.Node(uri=LAVALINK_URI, password=LAVALINK_PASSWORD)
+            await asyncio.wait_for(wavelink.Pool.connect(nodes=[node], client=bot), timeout=12)
+            lavalink_ready = True
+            print(f"[Lavalink] Node connected: {LAVALINK_URI}")
+        except Exception as exc:
+            print(f"[Lavalink] Node unavailable; using yt-dlp: {exc}")
+
     # Inicia a FastAPI apenas uma vez.
     if arcadz_api is None:
         try:
@@ -1061,7 +1191,8 @@ async def join(
 
     else:
 
-        player.voice = await channel.connect()
+        player.voice = await channel.connect(cls=ArcadzLavalinkVoice if lavalink_ready else discord.VoiceClient)
+        player.using_lavalink = isinstance(player.voice, ArcadzLavalinkVoice) and lavalink_ready
 
     await broadcast(
         interaction.guild.id,
@@ -1116,7 +1247,8 @@ async def play(
 
     if not player.voice:
 
-        player.voice = await channel.connect()
+        player.voice = await channel.connect(cls=ArcadzLavalinkVoice if lavalink_ready else discord.VoiceClient)
+        player.using_lavalink = isinstance(player.voice, ArcadzLavalinkVoice) and lavalink_ready
 
     elif player.voice.channel != channel:
 
@@ -1468,8 +1600,10 @@ async def volume(
     )
 
     player.volume = value / 100
+    if player.using_lavalink and player.voice:
+        await player.voice.set_volume(value)
 
-    if player.voice and player.voice.source:
+    if not player.using_lavalink and player.voice and player.voice.source:
 
         if isinstance(
             player.voice.source,
