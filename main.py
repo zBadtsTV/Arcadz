@@ -322,7 +322,10 @@ class MusicPlayer:
         self._reset_position()
 
         try:
-            source = discord.FFmpegPCMAudio(
+            # FFmpegPCMAudio starts an ffmpeg subprocess synchronously.
+            # Keep subprocess startup off the Discord/FastAPI event loop.
+            source = await asyncio.to_thread(
+                discord.FFmpegPCMAudio,
                 track.stream_url,
                 **FFMPEG_OPTIONS
             )
