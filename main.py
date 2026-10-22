@@ -199,6 +199,49 @@ async def broadcast(guild_id: int, event: str, data: Optional[dict[str, Any]] = 
             print(f"[ArcadZ] Erro no broadcast: {e}")
 
 
+if wavelink is not None:
+    class ArcadzLavalinkVoice(wavelink.Player):
+        def is_connected(self):
+            return self.connected
+
+        def is_playing(self):
+            return self.playing
+
+        def is_paused(self):
+            return self.paused
+else:
+    class ArcadzLavalinkVoice(discord.VoiceClient):
+        pass
+
+
+@bot.event
+async def on_wavelink_track_end(payload):
+    voice = payload.player
+    if not voice or not voice.guild:
+        return
+    player = players.get(voice.guild.id)
+    if not player or not player.using_lavalink:
+        return
+    if player._lavalink_suppress_end:
+        player._lavalink_suppress_end = False
+        return
+    if str(payload.reason).lower() in ("replaced", "cleanup"):
+        return
+    await player.play_next()
+
+
+@bot.event
+async def on_wavelink_track_exception(payload):
+    print(f"[Lavalink] Track exception: {getattr(payload, 'exception', 'unknown')}")
+
+
+@bot.event
+async def on_wavelink_track_stuck(payload):
+    print("[Lavalink] Track stuck; skipping.")
+    if payload.player:
+        await payload.player.skip()
+
+
 # ============================================================
 # MUSIC PLAYER
 # ============================================================
@@ -970,9 +1013,10 @@ class ArcadzBridge(Bridge):
 
         value = max(0, min(100, int(value)))
         player.volume = value / 100
-
+        if player.using_lavalink and player.voice:
+            await player.voice.set_volume(value)
         if (
-            player.voice
+            not player.using_lavalink and player.voice
             and player.voice.source
             and isinstance(
                 player.voice.source,
@@ -1062,6 +1106,16 @@ async def on_ready():
         f"Bot conectado como {bot.user}"
     )
 
+    global lavalink_ready
+    if not lavalink_ready and LAVALINK_URI and LAVALINK_PASSWORD and wavelink is not None:
+        try:
+            node = wavelink.Node(uri=LAVALINK_URI, password=LAVALINK_PASSWORD)
+            await asyncio.wait_for(wavelink.Pool.connect(nodes=[node], client=bot), timeout=12)
+            lavalink_ready = True
+            print(f"[Lavalink] Node connected: {LAVALINK_URI}")
+        except Exception as exc:
+            print(f"[Lavalink] Node unavailable; using yt-dlp: {exc}")
+
     # Inicia a FastAPI apenas uma vez.
     if arcadz_api is None:
         try:
@@ -1137,7 +1191,8 @@ async def join(
 
     else:
 
-        player.voice = await channel.connect()
+        player.voice = await channel.connect(cls=ArcadzLavalinkVoice if lavalink_ready else discord.VoiceClient)
+        player.using_lavalink = isinstance(player.voice, ArcadzLavalinkVoice) and lavalink_ready
 
     await broadcast(
         interaction.guild.id,
@@ -1192,7 +1247,8 @@ async def play(
 
     if not player.voice:
 
-        player.voice = await channel.connect()
+        player.voice = await channel.connect(cls=ArcadzLavalinkVoice if lavalink_ready else discord.VoiceClient)
+        player.using_lavalink = isinstance(player.voice, ArcadzLavalinkVoice) and lavalink_ready
 
     elif player.voice.channel != channel:
 
@@ -1544,8 +1600,10 @@ async def volume(
     )
 
     player.volume = value / 100
+    if player.using_lavalink and player.voice:
+        await player.voice.set_volume(value)
 
-    if player.voice and player.voice.source:
+    if not player.using_lavalink and player.voice and player.voice.source:
 
         if isinstance(
             player.voice.source,
