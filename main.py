@@ -260,6 +260,31 @@ class MusicPlayer:
 
     async def extract(self, query: str, requester: str):
         query = await resolve_music_query(query)
+        if self.using_lavalink:
+            started = time.monotonic()
+            search = query if query.startswith(("https://", "http://")) else "ytmsearch:" + query
+            try:
+                matches = await asyncio.wait_for(wavelink.Playable.search(search), timeout=14)
+            except Exception as exc:
+                print(f"[Lavalink] Busca YouTube falhou: {exc}")
+                matches = []
+            if not matches and not query.startswith(("http://", "https://")):
+                matches = await asyncio.wait_for(
+                    wavelink.Playable.search("scsearch:" + query), timeout=12
+                )
+            if not matches:
+                raise ValueError("Lavalink nao encontrou musica. Tente outro link ou pesquisa.")
+            item = matches.tracks[0] if hasattr(matches, "tracks") else matches[0]
+            print(f"[Lavalink] Faixa resolvida em {time.monotonic()-started:.2f}s")
+            return Track(
+                title=item.title, url=item.uri or query, stream_url="",
+                thumbnail=getattr(item, "artwork", None),
+                duration=round(item.length / 1000) if item.length else 0,
+                requester=requester, channel=getattr(item, "author", "") or "",
+                track_id=str(getattr(item, "identifier", "") or item.uri or query),
+                lavalink_playable=item,
+            )
+
         if not query.startswith(("http://", "https://", "ytsearch")):
             query = f"ytsearch1:{query}"
         loop = asyncio.get_running_loop()
@@ -526,6 +551,11 @@ class MusicPlayer:
     # --------------------------------------------------------
 
     def pause(self):
+        if self.using_lavalink:
+            if self.voice and self.voice.is_playing():
+                self.paused_at = asyncio.get_running_loop().time()
+                asyncio.create_task(self.voice.pause(True))
+            return
 
         if self.voice and self.voice.is_playing():
             self.paused_at = asyncio.get_running_loop().time()
@@ -536,6 +566,14 @@ class MusicPlayer:
     # --------------------------------------------------------
 
     def resume(self):
+        if self.using_lavalink:
+            if self.voice and self.voice.is_paused():
+                now = asyncio.get_running_loop().time()
+                if self.paused_at is not None:
+                    self.paused_total += now - self.paused_at
+                self.paused_at = None
+                asyncio.create_task(self.voice.pause(False))
+            return
 
         if self.voice and self.voice.is_paused():
             now = asyncio.get_running_loop().time()
@@ -551,6 +589,10 @@ class MusicPlayer:
     # --------------------------------------------------------
 
     def skip(self):
+        if self.using_lavalink:
+            if self.voice and self.current:
+                asyncio.create_task(self.voice.skip())
+            return
 
         if self.voice and (
             self.voice.is_playing()
@@ -563,6 +605,10 @@ class MusicPlayer:
     # --------------------------------------------------------
 
     def stop(self):
+        if self.using_lavalink:
+            self._lavalink_suppress_end = True
+            if self.voice and self.current:
+                asyncio.create_task(self.voice.skip())
 
         self.queue.clear()
 
