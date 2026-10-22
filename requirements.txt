@@ -5,3 +5,4 @@ PyNaCl
 bgutil-ytdlp-pot-provider
 fastapi
 uvicorn[standard]
+wavelink>=3.4,<4
