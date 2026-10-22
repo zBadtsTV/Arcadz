@@ -20,6 +20,15 @@ from discord import app_commands
 from discord.ext import commands
 import yt_dlp
 
+try:
+    import wavelink
+except ImportError:
+    wavelink = None
+
+LAVALINK_URI = os.getenv("LAVALINK_URI", "").strip()
+LAVALINK_PASSWORD = os.getenv("LAVALINK_PASSWORD", "").strip()
+lavalink_ready = False
+
 from backend.arcadz_api import ArcadzAPI, Bridge
 
 # ============================================================
@@ -170,6 +179,7 @@ class Track:
     requester: str
     channel: str = ""
     track_id: str = ""
+    lavalink_playable: Any = None
 
 
 # ============================================================
@@ -214,12 +224,16 @@ class MusicPlayer:
 
         # Histórico das músicas tocadas nesta execução do bot.
         self.history: list[Track] = []
+        self.using_lavalink = False
+        self._lavalink_suppress_end = False
 
     # --------------------------------------------------------
     # POSITION
     # --------------------------------------------------------
 
     def position_seconds(self) -> int:
+        if self.using_lavalink and self.voice and self.current:
+            return max(0, int(self.voice.position / 1000))
         if not self.current or self.started_at is None:
             return 0
 
@@ -353,6 +367,22 @@ class MusicPlayer:
 
         self._reset_position()
 
+        if self.using_lavalink:
+            try:
+                if track.lavalink_playable is None:
+                    raise ValueError("Faixa sem dados Lavalink.")
+                await self.voice.play(track.lavalink_playable, volume=round(self.volume * 100))
+                print(f"[Lavalink] Tocando: {track.title}")
+                await broadcast(self.guild.id, "track_started", self.api_current())
+                await broadcast(self.guild.id, "queue_updated", {
+                    "queue": [self.api_track(t) for t in self.queue]
+                })
+            except Exception as exc:
+                print(f"[Lavalink] Erro ao iniciar {track.title}: {exc}")
+                self.current = None
+                await self.play_next()
+            return
+
         try:
             # FFmpegPCMAudio starts an ffmpeg subprocess synchronously.
             # Keep subprocess startup off the Discord/FastAPI event loop.
@@ -474,7 +504,7 @@ class MusicPlayer:
 
         self.queue.append(track)
 
-        if not was_playing:
+        if not was_playing and not (self.voice and self.voice.is_paused()):
             await self.play_next()
 
         else:
