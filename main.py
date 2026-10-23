@@ -225,8 +225,19 @@ async def on_wavelink_track_end(payload):
     if player._lavalink_suppress_end:
         player._lavalink_suppress_end = False
         return
-    if str(payload.reason).lower() in ("replaced", "cleanup"):
+    reason = str(payload.reason).lower()
+    if reason in ("replaced", "cleanup"):
         return
+    if reason in ("loadfailed", "load_failed"):
+        # Lavalink may send TrackEnd before TrackException; let the
+        # recovery event handler attempt SoundCloud first.
+        await asyncio.sleep(0.5)
+        if player._lavalink_recovering:
+            return
+        if player.current and player.current.lavalink_playable is not payload.track:
+            return
+        if player._lavalink_retry_used:
+            return
     await player.play_next()
 
 
@@ -240,6 +251,48 @@ async def on_wavelink_track_start(payload):
 async def on_wavelink_track_exception(payload):
     error = getattr(payload, "exception", None)
     print(f"[Lavalink] TRACK_EXCEPTION title={getattr(payload.track, 'title', 'unknown')} message={getattr(error, 'message', error)} severity={getattr(error, 'severity', None)} cause={getattr(error, 'cause', None)}")
+    voice = payload.player
+    player = players.get(voice.guild.id) if voice and voice.guild else None
+    if not player or not player.using_lavalink or not player.current:
+        return
+    if player.current.lavalink_playable is not payload.track:
+        return
+    if player._lavalink_recovering or player._lavalink_retry_used:
+        return
+    player._lavalink_retry_used = True
+    player._lavalink_recovering = True
+    try:
+        original = player.current
+        lookup = " ".join(filter(None, [original.title, original.channel]))
+        print(f"[Lavalink] Tentando SoundCloud para: {lookup}")
+        results = await asyncio.wait_for(
+            wavelink.Playable.search("scsearch:" + lookup), timeout=12
+        )
+        options = results.tracks if hasattr(results, "tracks") else results
+        if not options:
+            raise ValueError("Faixa nao encontrada no SoundCloud")
+        candidate = options[0]
+        if player.current is not original:
+            return
+        # Keep metadata matching the actual fallback audio.
+        original.title = candidate.title
+        original.url = candidate.uri or original.url
+        original.channel = getattr(candidate, "author", "") or ""
+        original.thumbnail = getattr(candidate, "artwork", None)
+        original.duration = round(candidate.length / 1000) if candidate.length else 0
+        original.track_id = str(getattr(candidate, "identifier", "") or original.url)
+        original.lavalink_playable = candidate
+        await voice.play(candidate, volume=round(player.volume * 100))
+        print(f"[Lavalink] SoundCloud PLAY_SENT: {candidate.title}")
+        await broadcast(voice.guild.id, "track_started", player.api_current())
+    except Exception as exc:
+        print(f"[Lavalink] SoundCloud falhou: {exc}")
+        if player.current:
+            player.current = None
+            player._lavalink_recovering = False
+            await player.play_next()
+    finally:
+        player._lavalink_recovering = False
 
 
 @bot.event
@@ -281,6 +334,8 @@ class MusicPlayer:
         self.history: list[Track] = []
         self.using_lavalink = False
         self._lavalink_suppress_end = False
+        self._lavalink_recovering = False
+        self._lavalink_retry_used = False
 
     # --------------------------------------------------------
     # POSITION
@@ -317,15 +372,15 @@ class MusicPlayer:
         query = await resolve_music_query(query)
         if self.using_lavalink:
             started = time.monotonic()
-            search = query if query.startswith(("https://", "http://")) else "ytmsearch:" + query
+            search = query if query.startswith(("https://", "http://")) else "scsearch:" + query
             try:
                 matches = await asyncio.wait_for(wavelink.Playable.search(search), timeout=14)
             except Exception as exc:
-                print(f"[Lavalink] Busca YouTube falhou: {exc}")
+                print(f"[Lavalink] Busca principal falhou: {exc}")
                 matches = []
             if not matches and not query.startswith(("http://", "https://")):
                 matches = await asyncio.wait_for(
-                    wavelink.Playable.search("scsearch:" + query), timeout=12
+                    wavelink.Playable.search("ytmsearch:" + query), timeout=12
                 )
             if not matches:
                 raise ValueError("Lavalink nao encontrou musica. Tente outro link ou pesquisa.")
@@ -446,6 +501,8 @@ class MusicPlayer:
             self.history = self.history[:50]
 
         self._reset_position()
+        if self.using_lavalink and not self._lavalink_recovering:
+            self._lavalink_retry_used = False
 
         if self.using_lavalink:
             try:
@@ -776,7 +833,7 @@ class ArcadzBridge(Bridge):
         # Use Lavalink for site searches too. Previously only /play used
         # Lavalink, while /api/search still extracted via yt-dlp.
         if lavalink_ready and wavelink is not None:
-            identifier = query if query.startswith(("http://", "https://")) else "ytmsearch:" + query
+            identifier = query if query.startswith(("http://", "https://")) else "scsearch:" + query
             started = time.monotonic()
             results = await asyncio.wait_for(wavelink.Playable.search(identifier), timeout=18)
             tracks = results.tracks if hasattr(results, "tracks") else results
