@@ -231,8 +231,20 @@ async def on_wavelink_track_end(payload):
 
 
 @bot.event
+async def on_wavelink_track_start(payload):
+    voice = payload.player
+    print(f"[Lavalink] TRACK_START guild={getattr(getattr(voice, 'guild', None), 'id', None)} title={getattr(payload.track, 'title', 'unknown')} ping={getattr(voice, 'ping', None)}")
+
+
+@bot.event
 async def on_wavelink_track_exception(payload):
-    print(f"[Lavalink] Track exception: {getattr(payload, 'exception', 'unknown')}")
+    error = getattr(payload, "exception", None)
+    print(f"[Lavalink] TRACK_EXCEPTION title={getattr(payload.track, 'title', 'unknown')} message={getattr(error, 'message', error)} severity={getattr(error, 'severity', None)} cause={getattr(error, 'cause', None)}")
+
+
+@bot.event
+async def on_wavelink_websocket_closed(payload):
+    print(f"[Lavalink] VOICE_WEBSOCKET_CLOSED code={getattr(payload, 'code', None)} reason={getattr(payload, 'reason', None)} by_remote={getattr(payload, 'by_remote', None)}")
 
 
 @bot.event
@@ -440,7 +452,9 @@ class MusicPlayer:
                 if track.lavalink_playable is None:
                     raise ValueError("Faixa sem dados Lavalink.")
                 await self.voice.play(track.lavalink_playable, volume=round(self.volume * 100))
-                print(f"[Lavalink] Tocando: {track.title}")
+                print(f"[Lavalink] PLAY_SENT: {track.title} connected={self.voice.connected} playing={self.voice.playing} paused={self.voice.paused} ping={self.voice.ping}")
+                # PLAY_SENT only means Lavalink accepted a playback command.
+                # TRACK_START / TRACK_EXCEPTION confirm actual stream status.
                 await broadcast(self.guild.id, "track_started", self.api_current())
                 await broadcast(self.guild.id, "queue_updated", {
                     "queue": [self.api_track(t) for t in self.queue]
