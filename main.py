@@ -634,6 +634,10 @@ class MusicPlayer:
         requester: str
     ):
 
+        print(
+            f"[ArcadZ] Request play engine={'Lavalink' if self.using_lavalink else 'yt-dlp'} "
+            f"guild={self.guild.id} query={query[:120]}"
+        )
         track = await self.extract(
             query,
             requester
@@ -768,6 +772,51 @@ def get_player(
         )
 
     return players[guild.id]
+
+
+async def ensure_voice_engine(player: MusicPlayer, channel):
+    """Use Lavalink when configured; avoid silent yt-dlp fallback."""
+    if LAVALINK_URI and not lavalink_ready:
+        raise RuntimeError(
+            "Lavalink esta configurado, mas nao conectou. "
+            "Verifique os logs do node e reinicie o Arcadz."
+        )
+    voice = player.voice
+    if voice is not None and not voice.is_connected():
+        try:
+            await voice.disconnect(force=True)
+        except Exception as exc:
+            print(f"[ArcadZ] Falha ao limpar voice antiga: {exc}")
+        voice = None
+        player.voice = None
+
+    # An older voice client cannot become a Wavelink Player in-place.
+    if lavalink_ready and voice and not isinstance(voice, ArcadzLavalinkVoice):
+        if voice.is_playing() or voice.is_paused():
+            raise RuntimeError(
+                "O bot ainda esta reproduzindo pelo motor antigo. "
+                "Use /stop e /leave, depois /join."
+            )
+        await voice.disconnect(force=True)
+        player.voice = None
+        player.queue.clear()  # Legacy Track objects lack Lavalink playable data.
+        player.current = None
+        voice = None
+        print("[Lavalink] Cliente de voz antigo desconectado para migracao.")
+
+    if voice is None:
+        cls = ArcadzLavalinkVoice if lavalink_ready else discord.VoiceClient
+        voice = await channel.connect(cls=cls)
+        player.voice = voice
+    elif voice.channel != channel:
+        await voice.move_to(channel)
+
+    player.using_lavalink = lavalink_ready and isinstance(voice, ArcadzLavalinkVoice)
+    print(
+        f"[ArcadZ] Voice engine guild={player.guild.id}: "
+        f"{'Lavalink' if player.using_lavalink else 'yt-dlp/FFmpeg'}"
+    )
+    return voice
 
 
 # ============================================================
@@ -949,6 +998,11 @@ class ArcadzBridge(Bridge):
             raise ValueError(
                 "O bot não está conectado a um canal de voz. "
                 "Use /join no Discord primeiro."
+            )
+        if LAVALINK_URI and not player.using_lavalink:
+            raise ValueError(
+                "O canal atual ainda usa yt-dlp, embora Lavalink esteja configurado. "
+                "Use /leave e /join no Discord para trocar o motor."
             )
 
         # "next" coloca a música no começo da fila.
@@ -1277,16 +1331,11 @@ async def join(
         interaction.guild
     )
 
-    if player.voice:
-
-        await player.voice.move_to(
-            channel
-        )
-
-    else:
-
-        player.voice = await channel.connect(cls=ArcadzLavalinkVoice if lavalink_ready else discord.VoiceClient)
-        player.using_lavalink = isinstance(player.voice, ArcadzLavalinkVoice) and lavalink_ready
+    try:
+        await ensure_voice_engine(player, channel)
+    except Exception as exc:
+        await interaction.followup.send(f"❌ Falha na conexao de voz: {exc}")
+        return
 
     await broadcast(
         interaction.guild.id,
@@ -1339,16 +1388,11 @@ async def play(
         interaction.guild
     )
 
-    if not player.voice:
-
-        player.voice = await channel.connect(cls=ArcadzLavalinkVoice if lavalink_ready else discord.VoiceClient)
-        player.using_lavalink = isinstance(player.voice, ArcadzLavalinkVoice) and lavalink_ready
-
-    elif player.voice.channel != channel:
-
-        await player.voice.move_to(
-            channel
-        )
+    try:
+        await ensure_voice_engine(player, channel)
+    except Exception as exc:
+        await interaction.followup.send(f"❌ Falha na conexao de voz: {exc}")
+        return
 
     try:
 
