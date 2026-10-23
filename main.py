@@ -188,6 +188,7 @@ class Track:
 
 arcadz_api: Optional[ArcadzAPI] = None
 arcadz_api_task: Optional[asyncio.Task] = None
+event_loop_watch_task: Optional[asyncio.Task] = None
 
 
 async def broadcast(guild_id: int, event: str, data: Optional[dict[str, Any]] = None):
@@ -1255,6 +1256,10 @@ async def on_ready():
 
     global arcadz_api
     global arcadz_api_task
+    global event_loop_watch_task
+
+    if event_loop_watch_task is None or event_loop_watch_task.done():
+        event_loop_watch_task = asyncio.create_task(event_loop_lag_watchdog())
 
     print(
         f"Bot conectado como {bot.user}"
@@ -1301,6 +1306,29 @@ async def on_ready():
         )
 
 
+async def safe_defer(interaction: discord.Interaction) -> bool:
+    try:
+        await interaction.response.defer()
+        return True
+    except discord.NotFound as exc:
+        age = (discord.utils.utcnow() - interaction.created_at).total_seconds()
+        print(f"[Discord] Expired interaction before defer: command={getattr(interaction.command, 'name', '?')} age={age:.1f}s guild={interaction.guild_id}: {exc}")
+        return False
+    except discord.HTTPException as exc:
+        print(f"[Discord] Defer failed: {exc}")
+        return False
+
+
+async def event_loop_lag_watchdog():
+    loop = asyncio.get_running_loop()
+    while not bot.is_closed():
+        expected = loop.time() + 5
+        await asyncio.sleep(5)
+        delay = loop.time() - expected
+        if delay > 1.5:
+            print(f"[ArcadZ] WARNING: event loop stalled for {delay:.2f}s")
+
+
 # ============================================================
 # /JOIN
 # ============================================================
@@ -1329,7 +1357,8 @@ async def join(
 
         return
 
-    await interaction.response.defer()
+    if not await safe_defer(interaction):
+        return
 
     channel = interaction.user.voice.channel
 
@@ -1372,7 +1401,8 @@ async def play(
     query: str
 ):
 
-    await interaction.response.defer()
+    if not await safe_defer(interaction):
+        return
 
     if not interaction.guild:
         await interaction.followup.send(
@@ -1458,13 +1488,14 @@ async def play(
 )
 @app_commands.describe(query="Nome da musica e artista")
 async def deezer_test(interaction: discord.Interaction, query: str):
+    if not await safe_defer(interaction):
+        return
     if not interaction.guild or not interaction.user.voice:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             "Entre em um canal de voz do servidor primeiro.", ephemeral=True
         )
         return
 
-    await interaction.response.defer()
     if not lavalink_ready:
         await interaction.followup.send("Lavalink nao esta conectado.")
         return
