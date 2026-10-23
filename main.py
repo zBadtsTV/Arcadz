@@ -381,12 +381,12 @@ class MusicPlayer:
             except Exception as exc:
                 print(f"[Lavalink] Busca principal falhou: {exc}")
                 matches = []
-            if not matches and not query.startswith(("http://", "https://")):
-                matches = await asyncio.wait_for(
-                    wavelink.Playable.search("ytmsearch:" + query), timeout=12
-                )
             if not matches:
-                raise ValueError("Lavalink nao encontrou musica. Tente outro link ou pesquisa.")
+                raise ValueError(
+                    "Lavalink nao encontrou esta musica na fonte solicitada. "
+                    "Pesquisas por nome usam SoundCloud; nao tentamos YouTube "
+                    "automaticamente porque ele esta exigindo login."
+                )
             item = matches.tracks[0] if hasattr(matches, "tracks") else matches[0]
             print(f"[Lavalink] Faixa resolvida em {time.monotonic()-started:.2f}s")
             return Track(
@@ -900,7 +900,7 @@ class ArcadzBridge(Bridge):
                     "url": track.uri or query,
                     "requestedBy": "",
                 })
-            print(f"[Lavalink] API search: {len(output)} resultados em {time.monotonic()-started:.2f}s")
+            print(f"[Lavalink] API search fonte={'URL direta' if query.startswith(('http://', 'https://')) else 'SoundCloud'}: {len(output)} resultados em {time.monotonic()-started:.2f}s")
             return output
         if query.startswith(("https://", "http://")):
             return await asyncio.wait_for(asyncio.to_thread(self._search_url, query), timeout=25)
