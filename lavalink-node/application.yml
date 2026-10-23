@@ -11,7 +11,7 @@ lavalink:
       youtube: false
       soundcloud: true
       bandcamp: true
-      http: false
+      http: true  # Needed for direct Deezer preview MP3 test URLs
       local: false
     bufferDurationMs: 400
     frameBufferDurationMs: 5000
