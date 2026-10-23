@@ -229,15 +229,8 @@ async def on_wavelink_track_end(payload):
     if reason in ("replaced", "cleanup"):
         return
     if reason in ("loadfailed", "load_failed"):
-        # Lavalink may send TrackEnd before TrackException; let the
-        # recovery event handler attempt SoundCloud first.
-        await asyncio.sleep(0.5)
-        if player._lavalink_recovering:
-            return
-        if player.current and player.current.lavalink_playable is not payload.track:
-            return
-        if player._lavalink_retry_used:
-            return
+        # TrackException handles recovery and advancing after an audio error.
+        return
     await player.play_next()
 
 
@@ -255,9 +248,17 @@ async def on_wavelink_track_exception(payload):
     player = players.get(voice.guild.id) if voice and voice.guild else None
     if not player or not player.using_lavalink or not player.current:
         return
-    if player.current.lavalink_playable is not payload.track:
+    active = player.current.lavalink_playable
+    if (not active or
+        getattr(active, "identifier", None) != getattr(payload.track, "identifier", None)):
         return
-    if player._lavalink_recovering or player._lavalink_retry_used:
+    if player._lavalink_recovering:
+        return
+    if player._lavalink_retry_used:
+        # Alternative source has failed too. Skip this track; no infinite retry.
+        player.current = None
+        player.loop = False
+        await player.play_next()
         return
     player._lavalink_retry_used = True
     player._lavalink_recovering = True
@@ -282,13 +283,15 @@ async def on_wavelink_track_exception(payload):
         original.duration = round(candidate.length / 1000) if candidate.length else 0
         original.track_id = str(getattr(candidate, "identifier", "") or original.url)
         original.lavalink_playable = candidate
+        player._reset_position()
         await voice.play(candidate, volume=round(player.volume * 100))
         print(f"[Lavalink] SoundCloud PLAY_SENT: {candidate.title}")
         await broadcast(voice.guild.id, "track_started", player.api_current())
     except Exception as exc:
         print(f"[Lavalink] SoundCloud falhou: {exc}")
-        if player.current:
+        if player.current is original:
             player.current = None
+            player.loop = False
             player._lavalink_recovering = False
             await player.play_next()
     finally:
