@@ -1443,6 +1443,95 @@ async def play(
 
 
 # ============================================================
+# /DEEZER_TEST -- public, 30-second Deezer preview only
+# ============================================================
+
+@bot.tree.command(
+    name="deezer_test",
+    description="Testa 30 segundos de uma previa publica do Deezer."
+)
+@app_commands.describe(query="Nome da musica e artista")
+async def deezer_test(interaction: discord.Interaction, query: str):
+    if not interaction.guild or not interaction.user.voice:
+        await interaction.response.send_message(
+            "Entre em um canal de voz do servidor primeiro.", ephemeral=True
+        )
+        return
+
+    await interaction.response.defer()
+    if not lavalink_ready:
+        await interaction.followup.send("Lavalink nao esta conectado.")
+        return
+
+    query = query.strip()[:100]
+    if not query:
+        await interaction.followup.send("Informe uma musica.")
+        return
+
+    def fetch_deezer_preview():
+        from urllib.parse import urlencode, urlsplit
+        url = "https://api.deezer.com/search?" + urlencode({"q": query, "limit": 5})
+        with urlopen(Request(url, headers={"User-Agent": "ArcadzBot/1.0"}), timeout=10) as response:
+            payload = json.load(response)
+        if payload.get("error"):
+            raise ValueError(f"Deezer API: {payload['error'].get('message', 'erro desconhecido')}")
+        tracks = payload.get("data") or []
+        entry = next((t for t in tracks if t.get("preview")), None)
+        if entry is None:
+            raise ValueError("O Deezer nao ofereceu previa para esta pesquisa.")
+        preview_url = entry["preview"]
+        parsed = urlsplit(preview_url)
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme != "https" or not (
+            host == "dzcdn.net" or host.endswith(".dzcdn.net")
+        ):
+            raise ValueError("A previa retornada pelo Deezer nao usa um dominio permitido.")
+        return entry, preview_url
+
+    try:
+        entry, preview_url = await asyncio.to_thread(fetch_deezer_preview)
+        player = get_player(interaction.guild)
+        await ensure_voice_engine(player, interaction.user.voice.channel)
+        if not player.using_lavalink:
+            raise ValueError("Este teste requer o motor Lavalink.")
+        loaded = await asyncio.wait_for(wavelink.Playable.search(preview_url), timeout=15)
+        playable = loaded.tracks[0] if hasattr(loaded, "tracks") else (loaded[0] if loaded else None)
+        if playable is None:
+            raise ValueError(
+                "Lavalink nao carregou a previa MP3. Confirme http: true no node."
+            )
+
+        song = Track(
+            title=f"{entry.get('title', 'Faixa')} [PREVIA DE 30s]",
+            url=entry.get("link") or preview_url,
+            stream_url="",
+            thumbnail=(entry.get("album") or {}).get("cover_medium"),
+            duration=30,
+            requester=str(interaction.user),
+            channel=(entry.get("artist") or {}).get("name", ""),
+            track_id=f"deezer-preview-{entry.get('id')}",
+            lavalink_playable=playable,
+        )
+        player.queue.append(song)
+        if not player.voice.is_playing() and not player.voice.is_paused():
+            await player.play_next()
+        else:
+            await broadcast(player.guild.id, "queue_updated", {
+                "queue": [player.api_track(t) for t in player.queue]
+            })
+        print(f"[Deezer Preview] Solicitada: {song.title} / {song.channel}")
+        await interaction.followup.send(
+            f"🎵 Teste Deezer: **{song.title}** — {song.channel}. "
+            "Apenas 30 segundos; nao e reproducao integral."
+        )
+    except Exception as exc:
+        print(f"[Deezer Preview] Falha: {type(exc).__name__}: {exc}")
+        await interaction.followup.send(
+            f"❌ Teste Deezer falhou: `{str(exc)[:300]}`"
+        )
+
+
+# ============================================================
 # /PAUSE
 # ============================================================
 
