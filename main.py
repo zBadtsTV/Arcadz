@@ -254,6 +254,12 @@ async def on_wavelink_track_exception(payload):
         return
     if player._lavalink_recovering:
         return
+    if player.current.track_id.startswith("deezer-preview-"):
+        print("[Deezer Preview] Falha no audio da previa; sem fallback para outra fonte.")
+        player.loop = False
+        player.current = None
+        await player.play_next()
+        return
     if player._lavalink_retry_used:
         # Alternative source has failed too. Skip this track; no infinite retry.
         player.current = None
